@@ -4,6 +4,7 @@
 
 #define RESET_VALUE_COMPUTED_ROOT_MEAN_DISTANCE_ERROR VTK_DOUBLE_MAX
 #define MINIMUM_NUMBER_OF_POINTS_NEEDED_TO_MATCH 3
+#define MAXIMUM_NUMBER_OF_POINTS_NEEDED_FOR_DETERMINISTIC_MATCH 14
 
 //----------------------------------------------------------------------------
 vtkStandardNewMacro( vtkPointMatcher );
@@ -163,6 +164,11 @@ void vtkPointMatcher::Update()
     return;
   }
   
+  this->ComputedRootMeanSquareDistanceErrorMm = RESET_VALUE_COMPUTED_ROOT_MEAN_DISTANCE_ERROR;
+  this->MatchingAmbiguous = false;
+  this->OutputPointList1->Reset();
+  this->OutputPointList2->Reset();
+
   // check number of points, make sure point lists are already similar/same sizes
   if ( this->InputPointList1 == NULL )
   {
@@ -181,54 +187,112 @@ void vtkPointMatcher::Update()
   unsigned int differenceInPointListSizes = abs( pointList1Size - pointList2Size );
   if ( differenceInPointListSizes > this->MaximumDifferenceInNumberOfPoints )
   {
-    // no matching to do... though there should be a more elegant way to handle this
-    // situation that produces at least some kind of matching, even if it is a bad one.
-    // TODO: Copy inputs to outputs, then truncate the longer one.
+    // no matching to do... just output the first N points of both lists
+    int smallestNumberOfPoints = vtkMath::Min( pointList1Size, pointList2Size );
+    for ( int pointIndex = 0; pointIndex < smallestNumberOfPoints; pointIndex++ )
+    {
+      double point1[ 3 ];
+      this->InputPointList1->GetPoint( pointIndex, point1 );
+      this->OutputPointList1->InsertNextPoint( point1 );
+      double point2[ 3 ];
+      this->InputPointList2->GetPoint( pointIndex, point2 );
+      this->OutputPointList2->InsertNextPoint( point2 );
+    }
     this->OutputChangedTime.Modified();
     return;
   }
 
-  // determine which list is larger, which list is smaller
-  vtkPoints* largerPointsList = NULL; // temporary value
-  vtkPoints* smallerPointsList = NULL; // temporary value
-  if ( pointList1Size > pointList2Size )
+  int totalNumberOfPoints = ( pointList1Size + pointList2Size );
+  if ( totalNumberOfPoints < MAXIMUM_NUMBER_OF_POINTS_NEEDED_FOR_DETERMINISTIC_MATCH )
   {
-    largerPointsList = this->InputPointList1;
-    smallerPointsList = this->InputPointList2;
+    // determine which list is larger, which list is smaller
+    vtkPoints* largerPointsList = NULL; // temporary value
+    vtkPoints* smallerPointsList = NULL; // temporary value
+    if ( pointList1Size > pointList2Size )
+    {
+      largerPointsList = this->InputPointList1;
+      smallerPointsList = this->InputPointList2;
+    }
+    else
+    {
+      largerPointsList = this->InputPointList2;
+      smallerPointsList = this->InputPointList1;
+    }
+    int smallerPointListSize = smallerPointsList->GetNumberOfPoints();
+    int largerPointListSize = largerPointsList->GetNumberOfPoints();
+    // iterate through all valid numbers of points, based on the sizes
+    // of the inputs, and the maximum point difference specified
+    int minimumNumberOfPointsToMatch = vtkMath::Max( ( largerPointListSize - this->MaximumDifferenceInNumberOfPoints ), ( unsigned int )MINIMUM_NUMBER_OF_POINTS_NEEDED_TO_MATCH );
+    for ( int subsetSize = smallerPointListSize; subsetSize >= minimumNumberOfPointsToMatch; subsetSize-- )
+    {
+      vtkPointMatcher::UpdateBestMatchingForAllSubsetsOfPoints( subsetSize, smallerPointsList, largerPointsList,
+                                                                this->AmbiguityThresholdDistanceMm, this->ComputedRootMeanSquareDistanceErrorMm, this->MatchingAmbiguous,
+                                                                this->OutputPointList1, this->OutputPointList2 );
+      if ( this->ComputedRootMeanSquareDistanceErrorMm <= this->TolerableRootMeanSquareDistanceErrorMm )
+      {
+        // suitable solution has been found, no need to continue searching
+        break;
+      }
+    }
   }
   else
   {
-    largerPointsList = this->InputPointList2;
-    smallerPointsList = this->InputPointList1;
-  }
-  int smallerPointListSize = smallerPointsList->GetNumberOfPoints();
-  int largerPointListSize = largerPointsList->GetNumberOfPoints();
-
-  // iterate through all valid numbers of points, based on the sizes
-  // of the inputs, and the maximum point difference specified
-  int minimumNumberOfPointsToMatch = vtkMath::Max( ( largerPointListSize - this->MaximumDifferenceInNumberOfPoints ), ( unsigned int )MINIMUM_NUMBER_OF_POINTS_NEEDED_TO_MATCH );
-  for ( int numberOfPoints = smallerPointListSize; numberOfPoints >= minimumNumberOfPointsToMatch; numberOfPoints-- )
-  {
-    this->UpdateBestMatchingForAllSubsetsOfPoints( numberOfPoints );
-    if ( this->ComputedRootMeanSquareDistanceErrorMm <= this->TolerableRootMeanSquareDistanceErrorMm )
-    {
-      // suitable solution has been found, no need to continue searching
-      break;
-    }
+    vtkErrorMacro( "Matching for large point sets is not yet implemented." );
+    // 1. Find a subset of points with unique geometry in both input sets
+    //   - Compute a point distance matrix
+    //   - Find out which distances are 'unique'
+    //   - Count the 6 (or so) points with the highest number of 'unique' distances to other points
+    // 2. Compute correspondence between those points
+    // 3. Register the point sets based on those landmark points
+    // 4. Compute correspondence for the remaining points based on the shortest distances (greedy algorithm)
   }
 
   this->OutputChangedTime.Modified();
 }
 
 //------------------------------------------------------------------------------
-void vtkPointMatcher::UpdateBestMatchingForAllSubsetsOfPoints( int sizeOfSubset )
+void vtkPointMatcher::UpdateBestMatchingForAllSubsetsOfPoints(
+  int sizeOfSubset,
+  vtkPoints* pointList1,
+  vtkPoints* pointList2,
+  double ambiguityThresholdDistanceMm,
+  double& computedRootMeanSquareDistanceErrorMm,
+  bool& matchingAmbiguous,
+  vtkPoints* outputMatchedPointList1,
+  vtkPoints* outputMatchedPointList2 )
 {
+  if ( pointList1 == NULL )
+  {
+    vtkGenericWarningMacro( "Point list 1 is null." );
+    return;
+  }
+
+  int pointList1NumberOfPoints = pointList1->GetNumberOfPoints();
+  if ( pointList1NumberOfPoints < sizeOfSubset )
+  {
+    vtkGenericWarningMacro( "Looking for subsets of " << sizeOfSubset << " points, but list 1 has only " << pointList1NumberOfPoints << " points." );
+    return;
+  }
+
+  if ( pointList2 == NULL )
+  {
+    vtkGenericWarningMacro( "Point list 2 is null." );
+    return;
+  }
+
+  int pointList2NumberOfPoints = pointList2->GetNumberOfPoints();
+  if ( pointList2NumberOfPoints < sizeOfSubset )
+  {
+    vtkGenericWarningMacro( "Looking for subsets of " << sizeOfSubset << " points, but list 2 has only " << pointList2NumberOfPoints << " points." );
+    return;
+  }
+
   // generate sets of indices for all possible combinations of both input sets
   vtkSmartPointer< vtkCombinatoricGenerator > pointList1CombinationGenerator = vtkSmartPointer< vtkCombinatoricGenerator >::New();
   pointList1CombinationGenerator->SetCombinatoricToCombination();
   pointList1CombinationGenerator->SetSubsetSize( sizeOfSubset );
   pointList1CombinationGenerator->SetNumberOfInputSets( 1 );
-  for ( int pointIndex = 0; pointIndex < this->InputPointList1->GetNumberOfPoints(); pointIndex++ )
+  for ( int pointIndex = 0; pointIndex < pointList1NumberOfPoints; pointIndex++ )
   {
     pointList1CombinationGenerator->AddInputElement( 0, pointIndex );
   }
@@ -239,7 +303,7 @@ void vtkPointMatcher::UpdateBestMatchingForAllSubsetsOfPoints( int sizeOfSubset 
   pointList2CombinationGenerator->SetCombinatoricToCombination();
   pointList2CombinationGenerator->SetSubsetSize( sizeOfSubset );
   pointList2CombinationGenerator->SetNumberOfInputSets( 1 );
-  for ( int pointIndex = 0; pointIndex < this->InputPointList2->GetNumberOfPoints(); pointIndex++ )
+  for ( int pointIndex = 0; pointIndex < pointList2NumberOfPoints; pointIndex++ )
   {
     pointList2CombinationGenerator->AddInputElement( 0, pointIndex );
   }
@@ -261,25 +325,34 @@ void vtkPointMatcher::UpdateBestMatchingForAllSubsetsOfPoints( int sizeOfSubset 
       for ( vtkIdType pointIndex = 0; pointIndex < sizeOfSubset; pointIndex++ )
       {
         vtkIdType point1Index = ( vtkIdType ) pointList1CombinationIndices[ pointList1CombinationIndex ][ pointIndex ];
-        double* pointFromList1 = this->InputPointList1->GetPoint( point1Index );
+        double* pointFromList1 = pointList1->GetPoint( point1Index );
         pointList1Combination->SetPoint( pointIndex, pointFromList1 );
 
         vtkIdType point2Index = ( vtkIdType ) pointList2CombinationIndices[ pointList2CombinationIndex ][ pointIndex ];
-        double* pointFromList2 = this->InputPointList2->GetPoint( point2Index );
+        double* pointFromList2 = pointList2->GetPoint( point2Index );
         pointList2Combination->SetPoint( pointIndex, pointFromList2 );
       }
       // finally see how good this particular combination is
-      this->UpdateBestMatchingForSubsetOfPoints( pointList1Combination, pointList2Combination );
+      vtkPointMatcher::UpdateBestMatchingForSubsetOfPoints( pointList1Combination, pointList2Combination,
+                                                            ambiguityThresholdDistanceMm, computedRootMeanSquareDistanceErrorMm, matchingAmbiguous,
+                                                            outputMatchedPointList1, outputMatchedPointList2 );
     }
   }
 }
 
 //------------------------------------------------------------------------------
 // point pair matching will be based on the distances between each pair of ordered points.
-// we have an input reference point list and a compare point list. We want to reorder
-// the compare list such that the point-to-point distances are as close as possible to those 
-// in the reference list. We will permute over all possibilities (and only ever keep the best result.)
-void vtkPointMatcher::UpdateBestMatchingForSubsetOfPoints( vtkPoints* pointSubset1, vtkPoints* pointSubset2 )
+// we have two input point lists. We want to reorder the second list such that the 
+// point-to-point distances are as close as possible to those in the first.
+// We will permute over all possibilities (and only ever keep the best result.)
+void vtkPointMatcher::UpdateBestMatchingForSubsetOfPoints(
+  vtkPoints* pointSubset1, 
+  vtkPoints* pointSubset2,
+  double ambiguityThresholdDistanceMm,
+  double& computedRootMeanSquareDistanceErrorMm,
+  bool& matchingAmbiguous,
+  vtkPoints* outputMatchedPointList1,
+  vtkPoints* outputMatchedPointList2 )
 {
   // error checking
   if ( pointSubset1 == NULL )
@@ -341,7 +414,7 @@ void vtkPointMatcher::UpdateBestMatchingForSubsetOfPoints( vtkPoints* pointSubse
     permutedPointSubset2DistanceMatrix->SetPointList1( permutedPointSubset2 );
     permutedPointSubset2DistanceMatrix->SetPointList2( permutedPointSubset2 );
     permutedPointSubset2DistanceMatrix->Update();
-    double rootMeanSquareDistanceErrorMm = this->ComputeRootMeanSquareistanceErrors( pointSubset1DistanceMatrix, permutedPointSubset2DistanceMatrix );
+    double rootMeanSquareDistanceErrorMm = vtkPointMatcher::ComputeRootMeanSquareistanceErrors( pointSubset1DistanceMatrix, permutedPointSubset2DistanceMatrix );
 
     // case analysis for setting MatchingAmbiguous:
     // let ComputedRootMeanSquareDistanceErrorMm store the distance error for the *best* matching
@@ -375,30 +448,30 @@ void vtkPointMatcher::UpdateBestMatchingForSubsetOfPoints( vtkPoints* pointSubse
     //     of the best (final) ComputedRootMeanSquareDistanceErrorMm
 
     // flag ambiguous if suitability within some threshold of the best result so far
-    double differenceComparedToBestMm = this->ComputedRootMeanSquareDistanceErrorMm - rootMeanSquareDistanceErrorMm;
-    bool withinAmbiguityThresholdDistanceMm = ( fabs( differenceComparedToBestMm ) <= this->AmbiguityThresholdDistanceMm );
+    double differenceComparedToBestMm = computedRootMeanSquareDistanceErrorMm - rootMeanSquareDistanceErrorMm;
+    bool withinAmbiguityThresholdDistanceMm = ( fabs( differenceComparedToBestMm ) <= ambiguityThresholdDistanceMm );
 
     // is this the best matching?
-    if ( rootMeanSquareDistanceErrorMm < this->ComputedRootMeanSquareDistanceErrorMm )
+    if ( rootMeanSquareDistanceErrorMm < computedRootMeanSquareDistanceErrorMm )
     {
       if ( withinAmbiguityThresholdDistanceMm )
       {
         // case 1, described above
-        this->MatchingAmbiguous = true;
+        matchingAmbiguous = true;
       }
       else
       {
         // case 3, described above
-        this->MatchingAmbiguous = false;
+        matchingAmbiguous = false;
       }
-      this->ComputedRootMeanSquareDistanceErrorMm = rootMeanSquareDistanceErrorMm;
-      this->OutputPointList1->DeepCopy( pointSubset1 );
-      this->OutputPointList2->DeepCopy( permutedPointSubset2 );
+      computedRootMeanSquareDistanceErrorMm = rootMeanSquareDistanceErrorMm;
+      outputMatchedPointList1->DeepCopy( pointSubset1 );
+      outputMatchedPointList2->DeepCopy( permutedPointSubset2 );
     }
     else if ( withinAmbiguityThresholdDistanceMm )
     {
       // case 2, described above
-      this->MatchingAmbiguous = true;
+      matchingAmbiguous = true;
     }
   }
 }

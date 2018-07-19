@@ -89,9 +89,13 @@ class VTK_SLICER_FIDUCIALREGISTRATIONWIZARD_MODULE_LOGIC_EXPORT vtkPointMatcher 
     bool UpdateNeeded();
 
     // Logic helpers
-    void UpdateBestMatchingForAllSubsetsOfPoints( int sizeOfSubset );
-    void UpdateBestMatchingForSubsetOfPoints( vtkPoints* list1, vtkPoints* list2 );
-    double ComputeRootMeanSquareistanceErrors( vtkPointDistanceMatrix*, vtkPointDistanceMatrix* );
+    static void UpdateBestMatchingForAllSubsetsOfPoints( int sizeOfSubset, vtkPoints* pointList1, vtkPoints* pointList2,
+                                                         double ambiguityThresholdDistanceMm, double& computedRootMeanSquareDistanceErrorMm, bool& matchingAmbiguous,
+                                                         vtkPoints* outputMatchedPointList1, vtkPoints* outputMatchedPointList2 );
+    static void UpdateBestMatchingForSubsetOfPoints( vtkPoints* pointSubset1, vtkPoints* pointSubset2,
+                                                     double ambiguityThresholdDistanceMm, double& computedRootMeanSquareDistanceErrorMm, bool& matchingAmbiguous,
+                                                     vtkPoints* outputMatchedPointList1, vtkPoints* outputMatchedPointList2 );
+    static double ComputeRootMeanSquareistanceErrors( vtkPointDistanceMatrix*, vtkPointDistanceMatrix* );
 
     // Not implemented:
 		vtkPointMatcher(const vtkPointMatcher&);
