@@ -70,6 +70,46 @@ double vtkPointDistanceMatrix::GetDistance( int pointList1Index, int pointList2I
 }
 
 //------------------------------------------------------------------------------
+void vtkPointDistanceMatrix::GetDistances( vtkDoubleArray* outputArray )
+{
+  if ( outputArray == NULL )
+  {
+    vtkWarningMacro( "Output distances array is null." );
+    return;
+  }
+
+  if ( this->PointList1 == NULL )
+  {
+    vtkWarningMacro( "Point list 1 is null." )
+    return;
+  }
+  int pointList1Length = this->PointList1->GetNumberOfPoints();
+
+  if ( this->PointList2 == NULL )
+  {
+    vtkWarningMacro( "Point list 2 is null." )
+    return;
+  }
+  int pointList2Length = this->PointList2->GetNumberOfPoints();
+
+  if ( this->DistanceMatrix->GetNumberOfTuples() == 0 )
+  {
+    vtkGenericWarningMacro( "Matrix has no contents." )
+    return;
+  }
+
+  outputArray->Reset();
+  for ( int pointList1Index = 0; pointList1Index < pointList1Length; pointList1Index++ )
+  {
+    for ( int pointList2Index = 0; pointList2Index < pointList2Length; pointList2Index++ )
+    {
+      double currentDistance = GetDistance( pointList1Index, pointList2Index );
+      outputArray->InsertNextTuple1( currentDistance );
+    }
+  }
+}
+
+//------------------------------------------------------------------------------
 double vtkPointDistanceMatrix::GetMinimumDistance()
 {
   if ( UpdateNeeded()  )
@@ -110,6 +150,49 @@ double vtkPointDistanceMatrix::GetMinimumDistance()
     }
   }
   return minDistance;
+}
+
+//------------------------------------------------------------------------------
+double vtkPointDistanceMatrix::GetMaximumDistance()
+{
+  if ( UpdateNeeded()  )
+  {
+    Update();
+  }
+
+  if ( this->PointList1 == NULL )
+  {
+    vtkWarningMacro( "Point list 1 is null. Returning 0." )
+    return 0.0;
+  }
+  int pointList1Length = this->PointList1->GetNumberOfPoints();
+
+  if ( this->PointList2 == NULL )
+  {
+    vtkWarningMacro( "Point list 2 is null. Returning 0." )
+    return 0.0;
+  }
+  int pointList2Length = this->PointList2->GetNumberOfPoints();
+  
+  if ( this->DistanceMatrix->GetNumberOfTuples() == 0 )
+  {
+    vtkGenericWarningMacro( "Matrix has no contents. Returning 0." )
+    return 0.0;
+  }
+
+  double maxDistance = GetDistance( 0, 0 );
+  for ( int pointList1Index = 0; pointList1Index < pointList1Length; pointList1Index++ )
+  {
+    for ( int pointList2Index = 0; pointList2Index < pointList2Length; pointList2Index++ )
+    {
+      double currentDistance = GetDistance( pointList1Index, pointList2Index );
+      if ( currentDistance > maxDistance )
+      {
+        maxDistance = currentDistance;
+      }
+    }
+  }
+  return maxDistance;
 }
 
 //------------------------------------------------------------------------------

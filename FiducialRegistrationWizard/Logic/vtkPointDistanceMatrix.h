@@ -29,7 +29,9 @@ class VTK_SLICER_FIDUCIALREGISTRATIONWIZARD_MODULE_LOGIC_EXPORT vtkPointDistance
     vtkPoints* GetPointList1();
     vtkPoints* GetPointList2();
     double GetDistance( int list1Index, int list2Index );
+    void GetDistances( vtkDoubleArray* outputArray );
     double GetMinimumDistance();
+    double GetMaximumDistance();
     void Update();
 
     // compute pair-wise difference between two point distance matrices.
