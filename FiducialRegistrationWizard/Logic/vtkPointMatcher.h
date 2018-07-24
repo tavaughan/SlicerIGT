@@ -92,7 +92,9 @@ class VTK_SLICER_FIDUCIALREGISTRATIONWIZARD_MODULE_LOGIC_EXPORT vtkPointMatcher 
     vtkTimeStamp OutputChangedTime;
     bool UpdateNeeded();
 
-    // Logic helpers
+    // Logic helpers and internal attributes
+    void HandleMatchFailure(); // copies input point list to output point list. Used when matching is otherwise impossible.
+
     static void UpdateBestMatchingForSubsetsOfPoints( int minimumSubsetSize, int maximumSubsetSize,
                                                       vtkPoints* unmatchedPointList1, vtkPoints* unmatchedPointList2,
                                                       double ambiguityThresholdDistanceMm, bool& matchingAmbiguous, 
@@ -107,7 +109,7 @@ class VTK_SLICER_FIDUCIALREGISTRATIONWIZARD_MODULE_LOGIC_EXPORT vtkPointMatcher 
                                                      double ambiguityThresholdDistanceMm, bool& matchingAmbiguous,
                                                      double& computedRootMeanSquareDistanceErrorMm,
                                                      vtkPoints* outputMatchedPointList1, vtkPoints* outputMatchedPointList2 );
-    static double ComputeRootMeanSquareistanceErrors( vtkPointDistanceMatrix*, vtkPointDistanceMatrix* );
+    static double ComputeRootMeanSquareDistanceBetweenRegisteredPointSets( vtkPolyData* sourcePointsPolyData, vtkPolyData* targetPointsPolyData );
 
     static void ReorderPointsAccordingToUniqueGeometry( vtkPoints* inputUnsortedPointList, vtkPoints* outputSortedPointList );
     static void ComputeUniquenessForPointList( vtkPoints* pointList, vtkDoubleArray* pointList1PointUniquenesses );
